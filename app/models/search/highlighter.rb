@@ -18,7 +18,7 @@ class Search::Highlighter
           "#{OPENING_MARK}#{match}#{CLOSING_MARK}"
         end
       else
-        result.gsub!(/\b(#{Regexp.escape(term)}\w*)\b/i) do |match|
+        result.gsub!(/(?<![a-zA-Z0-9_])(#{Regexp.escape(term)}[a-zA-Z0-9_]*)(?![a-zA-Z0-9_])/i) do |match|
           "#{OPENING_MARK}#{match}#{CLOSING_MARK}"
         end
       end
@@ -46,7 +46,15 @@ class Search::Highlighter
 
         unquoted = query.gsub(/"[^"]+"/, "")
         unquoted.split(/\s+/).each do |word|
-          terms << word if word.present?
+          next unless word.present?
+
+          if word.match?(Search::CJK_PATTERN)
+            terms << word
+          else
+            stemmed = Search::Stemmer.stem(word)
+            terms << stemmed
+            terms << word.downcase unless word.downcase.start_with?(stemmed)
+          end
         end
 
         terms.uniq
@@ -68,7 +76,7 @@ class Search::Highlighter
     end
 
     def snippet_for_cjk(text, max_chars:)
-      match_index = terms.map { |term| text.index(term) }.compact.min
+      match_index = terms.map { |term| text =~ /#{Regexp.escape(term)}/i }.compact.min
 
       if text.length <= max_chars
         highlight(text)
