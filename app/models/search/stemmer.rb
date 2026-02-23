@@ -17,7 +17,12 @@ module Search::Stemmer
         if token.start_with?('"') && token.end_with?('"')
           "\"#{stem(token[1..-2])}\""
         else
-          stem(token)
+          stemmed = stem(token)
+          if stemmed.include?(" ") && token.match?(Search::CJK_PATTERN)
+            "\"#{stemmed}\""
+          else
+            stemmed
+          end
         end
       end
     else

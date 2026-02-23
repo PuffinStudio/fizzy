@@ -14,7 +14,7 @@ class Search::Highlighter
 
     terms.each do |term|
       if term.match?(Search::CJK_PATTERN)
-        result.gsub!(/(#{Regexp.escape(term)})/) do |match|
+        result.gsub!(/(#{Regexp.escape(term)})/i) do |match|
           "#{OPENING_MARK}#{match}#{CLOSING_MARK}"
         end
       else
