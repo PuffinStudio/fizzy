@@ -54,4 +54,28 @@ class Search::StemmerTest < ActiveSupport::TestCase
 
     assert_equal "run 测 试 jump", result
   end
+
+  test "stem_query preserves quoted phrases" do
+    result = Search::Stemmer.stem_query('"hello world" running')
+
+    assert_equal '"hello world" run', result
+  end
+
+  test "stem_query stems words inside quotes" do
+    result = Search::Stemmer.stem_query('"running tests"')
+
+    assert_equal '"run test"', result
+  end
+
+  test "stem_query handles CJK with quotes" do
+    result = Search::Stemmer.stem_query('"测试" running')
+
+    assert_equal '"测 试" run', result
+  end
+
+  test "stem_query without quotes behaves like stem" do
+    result = Search::Stemmer.stem_query("running jumping")
+
+    assert_equal "run jump", result
+  end
 end

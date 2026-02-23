@@ -11,6 +11,20 @@ module Search::Stemmer
     end
   end
 
+  def stem_query(value)
+    if value.present?
+      value.gsub(/"[^"]*"|\S+/) do |token|
+        if token.start_with?('"') && token.end_with?('"')
+          "\"#{stem(token[1..-2])}\""
+        else
+          stem(token)
+        end
+      end
+    else
+      value
+    end
+  end
+
   private
     def tokenize(value)
       tokens = []

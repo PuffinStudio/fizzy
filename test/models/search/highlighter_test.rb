@@ -129,6 +129,28 @@ class Search::HighlighterTest < ActiveSupport::TestCase
     assert result.end_with?("...")
   end
 
+  test "highlight stems terms for better matching" do
+    highlighter = Search::Highlighter.new("running")
+    result = highlighter.highlight("I like to run every day")
+
+    assert_equal "I like to #{mark('run')} every day", result
+  end
+
+  test "snippet finds CJK match case-insensitively" do
+    highlighter = Search::Highlighter.new("test")
+    text = "これは非常に長い日本語のテキストでTESTという単語を含む" * 3
+    result = highlighter.snippet(text, max_words: 10)
+
+    assert_includes result, mark("TEST")
+  end
+
+  test "highlight Latin terms adjacent to CJK characters" do
+    highlighter = Search::Highlighter.new("test")
+    result = highlighter.highlight("日本語TESTテスト")
+
+    assert_equal "日本語#{mark('TEST')}テスト", result
+  end
+
   private
     def mark(text)
       "#{Search::Highlighter::OPENING_MARK}#{text}#{Search::Highlighter::CLOSING_MARK}"
