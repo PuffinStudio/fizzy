@@ -78,4 +78,10 @@ class Search::StemmerTest < ActiveSupport::TestCase
 
     assert_equal "run jump", result
   end
+
+  test "stem_query wraps unquoted CJK tokens as phrase" do
+    result = Search::Stemmer.stem_query("中文 running")
+
+    assert_equal '"中 文" run', result
+  end
 end

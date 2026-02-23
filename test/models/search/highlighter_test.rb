@@ -151,6 +151,13 @@ class Search::HighlighterTest < ActiveSupport::TestCase
     assert_equal "日本語#{mark('TEST')}テスト", result
   end
 
+  test "highlight mixed CJK and Latin term case-insensitively" do
+    highlighter = Search::Highlighter.new("日本語test")
+    result = highlighter.highlight("これは日本語TESTです")
+
+    assert_equal "これは#{mark('日本語TEST')}です", result
+  end
+
   private
     def mark(text)
       "#{Search::Highlighter::OPENING_MARK}#{text}#{Search::Highlighter::CLOSING_MARK}"
