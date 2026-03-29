@@ -1,0 +1,44 @@
+#!/bin/bash
+# CJK搜索诊断脚本
+# 在Coolify容器中运行此脚本检查搜索配置
+
+echo "=========================================="
+echo "🔍 CJK搜索诊断"
+echo "=========================================="
+
+echo ""
+echo "1️⃣ 检查数据库适配器:"
+bin/rails runner "puts \"Adapter: #{ActiveRecord::Base.connection.adapter_name}\""
+
+echo ""
+echo "2️⃣ 检查FTS5表结构:"
+bin/rails runner "
+if ActiveRecord::Base.connection.adapter_name == 'SQLite'
+  result = ActiveRecord::Base.connection.execute(\"SELECT sql FROM sqlite_master WHERE name='search_records_fts'\")
+  puts result.first&.first || 'Table not found!'
+else
+  puts 'Not SQLite - FTS5 not available'
+end
+"
+
+echo ""
+echo "3️⃣ 检查迁移状态:"
+bin/rails db:migrate:status 2>&1 | grep -A2 -B2 "ChangeSearchFtsTokenizerToUnicode61" || echo "迁移未执行"
+
+echo ""
+echo "4️⃣ 检查搜索记录数量:"
+bin/rails runner "puts \"Search records: #{Search::Record.count}\""
+
+echo ""
+echo "5️⃣ 测试中文分词:"
+bin/rails runner "
+text = '中文测试'
+puts \"Input: #{text}\"
+puts \"Tokenized: #{Search::Stemmer.stem(text)}\"
+puts \"Has CJK? #{text.match?(Search::CJK_PATTERN) ? 'Yes' : 'No'}\"
+"
+
+echo ""
+echo "=========================================="
+echo "诊断完成"
+echo "=========================================="

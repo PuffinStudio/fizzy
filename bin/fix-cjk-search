@@ -1,0 +1,108 @@
+#!/bin/bash
+# CJK搜索修复脚本
+# 在Coolify容器中运行此脚本修复中文/日文/韩文搜索
+
+echo "=========================================="
+echo "🔧 CJK搜索修复工具"
+echo "=========================================="
+
+echo ""
+echo "Step 1/4: 检查数据库配置..."
+ADAPTER=$(bin/rails runner "puts ActiveRecord::Base.connection.adapter_name" 2>/dev/null)
+echo "数据库适配器: $ADAPTER"
+
+if [ "$ADAPTER" != "SQLite" ]; then
+  echo "⚠️  警告: 当前使用 $ADAPTER，CJK搜索可能不完全支持"
+  echo "    建议切换到 SQLite 以获得完整的CJK搜索功能"
+  echo ""
+  echo "是否继续? (y/N)"
+  read -r response
+  if [ "$response" != "y" ]; then
+    exit 1
+  fi
+fi
+
+echo ""
+echo "Step 2/4: 执行数据库迁移..."
+bin/rails db:migrate
+
+echo ""
+echo "Step 3/4: 检查FTS5表..."
+if [ "$ADAPTER" == "SQLite" ]; then
+  TABLE_INFO=$(bin/rails runner "
+    result = ActiveRecord::Base.connection.execute(\"SELECT sql FROM sqlite_master WHERE name='search_records_fts'\")
+    puts result.first&.first || 'NOT_FOUND'
+  " 2>/dev/null)
+  
+  echo "FTS表信息: $TABLE_INFO"
+  
+  if echo "$TABLE_INFO" | grep -q "unicode61"; then
+    echo "✅ FTS5表已正确配置 (unicode61)"
+  elif echo "$TABLE_INFO" | grep -q "porter"; then
+    echo "⚠️  FTS5表使用旧配置 (porter)，需要重建"
+    echo "重建FTS表..."
+    bin/rails runner "
+      ActiveRecord::Base.connection.execute('DROP TABLE IF EXISTS search_records_fts')
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        CREATE VIRTUAL TABLE search_records_fts USING fts5(
+          title,
+          content,
+          tokenize='unicode61'
+        )
+      SQL
+      puts 'FTS表已重建'
+    "
+  else
+    echo "❌ FTS表不存在，正在创建..."
+    bin/rails runner "
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_records_fts USING fts5(
+          title,
+          content,
+          tokenize='unicode61'
+        )
+      SQL
+      puts 'FTS表已创建'
+    "
+  fi
+fi
+
+echo ""
+echo "Step 4/4: 重建搜索索引..."
+bin/rails runner "
+  puts '清除旧索引...'
+  ActiveRecord::Base.connection.execute('DELETE FROM search_records_fts') rescue nil
+  
+  puts '重新索引所有卡片...'
+  Search::Record.find_each do |record|
+    begin
+      stemmed_title = Search::Stemmer.stem(record.title.to_s)
+      stemmed_content = Search::Stemmer.stem(record.content.to_s)
+      
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        INSERT INTO search_records_fts(rowid, title, content) 
+        VALUES (#{record.id}, 
+                #{ActiveRecord::Base.connection.quote(stemmed_title)}, 
+                #{ActiveRecord::Base.connection.quote(stemmed_content)})
+      SQL
+      print '.'
+    rescue => e
+      print 'X'
+    end
+  end
+  puts ''
+  puts '索引完成！'
+"
+
+echo ""
+echo "=========================================="
+echo "✅ 修复完成"
+echo "=========================================="
+echo ""
+echo "现在测试搜索："
+echo "1. 创建一个包含中文的卡片"
+echo "2. 搜索中文关键词"
+echo ""
+echo "如果仍然不工作，请检查："
+echo "- 数据库是否是 SQLite"
+echo "- 卡片是否已经发布（草稿不会索引）"
