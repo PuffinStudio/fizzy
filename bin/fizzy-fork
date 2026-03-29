@@ -1,0 +1,489 @@
+#!/bin/bash
+# ============================================================
+# Fizzy Fork 管理工作流 - 安全版本
+# 永远保留自定义修改，永不推送自定义内容到上游
+# ============================================================
+
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_header() {
+    echo -e "${BLUE}"
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║  Fizzy Fork 管理工作流 - 安全同步版本                    ║"
+    echo "║  自定义修改永远保留，永不污染上游代码                   ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+# ============================================================
+# 核心配置 - 安全设置
+# ============================================================
+UPSTREAM_URL="https://github.com/basecamp/fizzy.git"
+ORIGIN_URL="git@github.com:PuffinStudio/fizzy.git"
+CUSTOM_BRANCH="custom/main"
+UPSTREAM_BRANCH="upstream/main"
+DEPLOY_BRANCH="deploy"
+
+# 安全检查函数
+check_remotes() {
+    echo -e "${YELLOW}🔒 检查Git远程配置...${NC}"
+    
+    # 确保upstream是fetch-only
+    local upstream_push=$(git remote get-url --push upstream 2>/dev/null || echo "")
+    if [ "$upstream_push" != "NO_PUSH_CONFIGURED" ] && [ "$upstream_push" != "" ]; then
+        echo -e "${YELLOW}⚠️ 警告: upstream仍具有push权限，正在移除...${NC}"
+        git remote set-url --push upstream "NO_PUSH_CONFIGURED"
+        echo -e "${GREEN}✅ 已禁用upstream推送权限${NC}"
+    fi
+    
+    # 显示当前配置
+    echo -e "${BLUE}当前远程配置：${NC}"
+    git remote -v | while read line; do
+        if [[ $line == *"upstream"* ]] && [[ $line == *"(push)"* ]]; then
+            echo -e "${GREEN}  $line${NC} (已禁用推送)"
+        else
+            echo "  $line"
+        fi
+    done
+    echo ""
+}
+
+# ============================================================
+# 初始化工作流
+# ============================================================
+init_workflow() {
+    print_header
+    
+    echo -e "${YELLOW}🚀 初始化Fizzy Fork安全管理工作流...${NC}"
+    echo ""
+    
+    # 1. 设置远程仓库
+    if ! git remote | grep -q "^upstream$"; then
+        echo "📡 添加上游官方仓库 (fetch-only)..."
+        git remote add upstream "$UPSTREAM_URL"
+        git remote set-url --push upstream "NO_PUSH_CONFIGURED"
+        echo -e "${GREEN}✅ upstream已添加 (仅拉取，禁止推送)${NC}"
+    else
+        echo "📡 更新上游配置为fetch-only..."
+        git remote set-url upstream "$UPSTREAM_URL"
+        git remote set-url --push upstream "NO_PUSH_CONFIGURED"
+        echo -e "${GREEN}✅ upstream已更新 (仅拉取，禁止推送)${NC}"
+    fi
+    
+    # 2. 获取上游代码
+    echo ""
+    echo "📥 获取上游最新代码..."
+    git fetch upstream
+    echo -e "${GREEN}✅ 已获取上游代码${NC}"
+    
+    # 3. 创建custom/main分支（你的真相源）
+    echo ""
+    echo "🎨 创建 $CUSTOM_BRANCH 分支（自定义修改的真相源）..."
+    
+    if git branch --list "$CUSTOM_BRANCH" | grep -q "$CUSTOM_BRANCH"; then
+        echo -e "${YELLOW}⚠️ $CUSTOM_BRANCH 已存在${NC}"
+        git checkout "$CUSTOM_BRANCH"
+    else
+        git checkout -b "$CUSTOM_BRANCH" upstream/main
+        echo -e "${GREEN}✅ 已创建 $CUSTOM_BRANCH 分支${NC}"
+    fi
+    
+    # 4. 设置分支跟踪
+    git branch --set-upstream-to=origin/main "$CUSTOM_BRANCH" 2>/dev/null || true
+    
+    # 5. 创建部署分支
+    echo ""
+    echo "🚀 创建 $DEPLOY_BRANCH 分支（用于部署）..."
+    if git branch --list "$DEPLOY_BRANCH" | grep -q "$DEPLOY_BRANCH"; then
+        echo -e "${YELLOW}⚠️ $DEPLOY_BRANCH 已存在${NC}"
+    else
+        git branch "$DEPLOY_BRANCH" "$CUSTOM_BRANCH"
+        echo -e "${GREEN}✅ 已创建 $DEPLOY_BRANCH 分支${NC}"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✅ 工作流初始化完成！${NC}"
+    echo ""
+    show_workflow
+}
+
+# ============================================================
+# 同步上游（仅fetch，无风险）
+# ============================================================
+sync_upstream() {
+    print_header
+    check_remotes
+    
+    echo -e "${YELLOW}🔄 同步上游官方代码...${NC}"
+    echo ""
+    
+    # 检查当前分支
+    current_branch=$(git branch --show-current)
+    
+    # 如果有未提交的更改，先stash
+    if ! git diff-index --quiet HEAD --; then
+        echo -e "${YELLOW}💾 发现未提交更改，正在保存...${NC}"
+        stash_msg="Auto-stash before sync: $(date '+%Y-%m-%d %H:%M:%S')"
+        git stash push -m "$stash_msg"
+        stashed=true
+    else
+        stashed=false
+    fi
+    
+    # 步骤1: 获取上游代码（仅fetch，100%安全）
+    echo "📥 步骤1: 获取上游代码..."
+    git fetch upstream
+    echo -e "${GREEN}✅ 已获取 upstream/main 最新代码${NC}"
+    
+    # 步骤2: 更新本地upstream-tracking分支
+    echo ""
+    echo "📥 步骤2: 更新本地上游镜像..."
+    
+    # 使用临时分支或直接引用，不切换
+    local_upstream_commit=$(git rev-parse upstream/main)
+    echo -e "${BLUE}上游最新commit: ${local_upstream_commit:0:8}${NC}"
+    
+    # 步骤3: 将上游代码合并到custom/main
+    echo ""
+    echo "🔀 步骤3: 合并上游代码到 $CUSTOM_BRANCH..."
+    git checkout "$CUSTOM_BRANCH"
+    
+    # 使用merge --no-ff保留历史
+    if git merge upstream/main --no-edit -m "sync: merge upstream/main ($(date '+%Y-%m-%d'))"; then
+        echo -e "${GREEN}✅ 已成功合并上游代码${NC}"
+    else
+        echo -e "${RED}❌ 合并出现冲突${NC}"
+        echo "请手动解决冲突，然后运行:"
+        echo "  git add ."
+        echo "  git merge --continue"
+        echo "  $0 push-custom"
+        exit 1
+    fi
+    
+    # 步骤4: 恢复stash的更改（如果有）
+    if [ "$stashed" = true ]; then
+        echo ""
+        echo "📦 步骤4: 恢复之前保存的更改..."
+        git stash pop
+        echo -e "${YELLOW}⚠️ 注意：你有未提交的更改，请检查并提交${NC}"
+    fi
+    
+    # 步骤5: 更新deploy分支
+    echo ""
+    echo "🚀 步骤5: 更新 $DEPLOY_BRANCH 分支..."
+    git branch -f "$DEPLOY_BRANCH" "$CUSTOM_BRANCH"
+    echo -e "${GREEN}✅ $DEPLOY_BRANCH 已更新至最新${NC}"
+    
+    echo ""
+    echo -e "${GREEN}✅ 同步完成！${NC}"
+    echo ""
+    echo "📋 当前状态："
+    git log --oneline --graph --decorate -5 "$CUSTOM_BRANCH"
+    echo ""
+    echo "💡 下一步操作："
+    echo "   1. 测试应用: bin/dev"
+    echo "   2. 推送自定义分支: $0 push-custom"
+    echo "   3. 部署: $0 deploy"
+}
+
+# ============================================================
+# 推送自定义分支到origin（安全操作）
+# ============================================================
+push_custom() {
+    print_header
+    check_remotes
+    
+    echo -e "${YELLOW}⬆️ 推送自定义分支到 origin...${NC}"
+    echo ""
+    
+    current_branch=$(git branch --show-current)
+    
+    # 确保在custom/main分支
+    if [ "$current_branch" != "$CUSTOM_BRANCH" ]; then
+        echo "🔄 切换到 $CUSTOM_BRANCH 分支..."
+        git checkout "$CUSTOM_BRANCH"
+    fi
+    
+    # 安全检查：确认不会推送到upstream
+    remote=$(git config --get "branch.$CUSTOM_BRANCH.remote" 2>/dev/null || echo "origin")
+    if [ "$remote" == "upstream" ]; then
+        echo -e "${RED}❌ 错误: 当前分支跟踪的是upstream！${NC}"
+        echo "正在修复..."
+        git branch --set-upstream-to=origin/main "$CUSTOM_BRANCH"
+    fi
+    
+    echo "📤 正在推送 $CUSTOM_BRANCH 到 origin..."
+    git push origin "$CUSTOM_BRANCH"
+    
+    echo ""
+    echo -e "${GREEN}✅ 已安全推送到你的fork（origin）${NC}"
+    echo -e "${BLUE}📍 推送目标: origin/$CUSTOM_BRANCH${NC}"
+    echo -e "${GREEN}🔒 保证: 不会推送到官方仓库${NC}"
+}
+
+# ============================================================
+# 部署工作流
+# ============================================================
+deploy_workflow() {
+    print_header
+    check_remotes
+    
+    echo -e "${YELLOW}🚀 准备部署...${NC}"
+    echo ""
+    
+    # 获取当前版本信息
+    custom_commit=$(git rev-parse --short "$CUSTOM_BRANCH")
+    upstream_commit=$(git rev-parse --short upstream/main)
+    
+    echo -e "${BLUE}当前版本信息：${NC}"
+    echo "  custom/main:  $custom_commit"
+    echo "  upstream:     $upstream_commit"
+    echo ""
+    
+    # 创建deploy分支（合并custom/main）
+    echo "🔀 创建部署分支..."
+    git branch -f "$DEPLOY_BRANCH" "$CUSTOM_BRANCH"
+    git checkout "$DEPLOY_BRANCH"
+    echo -e "${GREEN}✅ 已创建 $DEPLOY_BRANCH 分支${NC}"
+    
+    echo ""
+    echo -e "${YELLOW}⚠️ 部署前检查清单：${NC}"
+    echo "  □ 测试通过: bin/rails test"
+    echo "  □ 数据库迁移: bin/rails db:migrate"
+    echo "  □ 静态资源: bin/rails assets:precompile"
+    echo ""
+    
+    read -p "是否继续部署？ (y/N): " confirm
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "${GREEN}🚀 开始部署...${NC}"
+        echo "运行: bin/kamal deploy"
+        bin/kamal deploy
+    else
+        echo -e "${YELLOW}⏸️ 已取消部署${NC}"
+        git checkout "$CUSTOM_BRANCH"
+    fi
+}
+
+# ============================================================
+# 合并上游特定PR（如PR #2337）
+# ============================================================
+merge_pr() {
+    print_header
+    check_remotes
+    
+    local pr_number=$1
+    
+    if [ -z "$pr_number" ]; then
+        echo -e "${RED}❌ 错误: 请提供PR编号${NC}"
+        echo "用法: $0 merge-pr <PR_NUMBER>"
+        echo "示例: $0 merge-pr 2337"
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}🔀 合并上游PR #$pr_number...${NC}"
+    echo ""
+    
+    # 获取PR
+    echo "📥 获取PR #$pr_number..."
+    git fetch upstream pull/$pr_number/head:pr-$pr_number-temp 2>/dev/null || {
+        echo -e "${RED}❌ 无法获取PR #$pr_number${NC}"
+        echo "可能的原因："
+        echo "  - PR不存在或已关闭"
+        echo "  - 需要GitHub CLI: gh auth login"
+        exit 1
+    }
+    
+    # 显示PR信息
+    echo ""
+    echo "📋 PR信息："
+    git log --oneline pr-$pr_number-temp -5
+    echo ""
+    
+    # 创建合并分支
+    local merge_branch="feature/pr-$pr_number"
+    echo "🎨 创建合并分支: $merge_branch"
+    
+    if git branch --list "$merge_branch" | grep -q "$merge_branch"; then
+        git branch -D "$merge_branch"
+    fi
+    
+    git checkout -b "$merge_branch" "$CUSTOM_BRANCH"
+    
+    # Cherry-pick或merge
+    read -p "选择合并方式: 1) cherry-pick所有commits  2) 直接merge PR分支: " method
+    
+    if [ "$method" == "1" ]; then
+        echo "🍒 Cherry-picking commits..."
+        # 获取commit范围
+        first_commit=$(git rev-list --reverse pr-$pr_number-temp | head -1)
+        last_commit=$(git rev-parse pr-$pr_number-temp)
+        git cherry-pick "$first_commit..$last_commit" || {
+            echo -e "${RED}❌ Cherry-pick失败，有冲突${NC}"
+            echo "请手动解决后运行: git cherry-pick --continue"
+            exit 1
+        }
+    else
+        echo "🔀 直接合并PR分支..."
+        git merge pr-$pr_number-temp --no-edit -m "feat: merge PR #$pr_number" || {
+            echo -e "${RED}❌ Merge失败，有冲突${NC}"
+            exit 1
+        }
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✅ PR #$pr_number 已合并到 $merge_branch${NC}"
+    echo ""
+    echo "💡 后续步骤："
+    echo "   1. 测试: bin/rails test"
+    echo "   2. 合并到custom/main: git checkout $CUSTOM_BRANCH && git merge $merge_branch"
+    echo "   3. 推送: $0 push-custom"
+    
+    # 清理临时分支
+    git branch -D pr-$pr_number-temp 2>/dev/null || true
+}
+
+# ============================================================
+# 显示工作流说明
+# ============================================================
+show_workflow() {
+    echo -e "${BLUE}"
+    echo "═══════════════════════════════════════════════════════════"
+    echo "                  安全工作流架构                            "
+    echo "═══════════════════════════════════════════════════════════"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${GREEN}分支结构：${NC}"
+    echo "  ${YELLOW}upstream/main${NC}    ← 官方代码 (fetch-only, 永不推送)"
+    echo "         │"
+    echo "         ▼"
+    echo "  ${GREEN}custom/main${NC}      ← 你的真相源 (自定义修改 + 上游代码)"
+    echo "         │"
+    echo "         ├── ${BLUE}app/assets/stylesheets/_custom-theme.css${NC}"
+    echo "         ├── ${BLUE}saas/扩展...${NC}"
+    echo "         └── ${BLUE}其他自定义...${NC}"
+    echo "         │"
+    echo "         ▼"
+    echo "  ${CYAN}deploy${NC}           ← 部署分支 (用于kamal deploy)"
+    echo ""
+    echo -e "${GREEN}命令列表：${NC}"
+    echo "  $0 init              初始化工作流（只需运行一次）"
+    echo "  $0 sync              同步上游代码到custom/main"
+    echo "  $0 push-custom       推送custom/main到你的fork"
+    echo "  $0 merge-pr <num>    合并上游特定PR（如2337）"
+    echo "  $0 deploy            准备并执行部署"
+    echo "  $0 status            显示当前状态"
+    echo "  $0 help              显示帮助"
+    echo ""
+    echo -e "${YELLOW}安全保证：${NC}"
+    echo "  ✅ upstream配置为fetch-only，无法推送"
+    echo "  ✅ 所有自定义修改保留在custom/main分支"
+    echo "  ✅ origin是你的fork，可以安全推送"
+    echo "  ✅ 官方代码永远不会收到你的自定义内容"
+    echo ""
+}
+
+# ============================================================
+# 显示当前状态
+# ============================================================
+show_status() {
+    print_header
+    check_remotes
+    
+    echo -e "${BLUE}📊 当前仓库状态${NC}"
+    echo ""
+    
+    echo -e "${YELLOW}分支状态：${NC}"
+    git branch -vv | grep -E "(custom/main|deploy|upstream)" || echo "  (暂无特殊分支)"
+    echo ""
+    
+    echo -e "${YELLOW}最近提交：${NC}"
+    git log --oneline --graph --decorate -5 --all
+    echo ""
+    
+    echo -e "${YELLOW}与上游的差异：${NC}"
+    git rev-list --left-right --count upstream/main...custom/main 2>/dev/null || echo "  custom/main尚未创建"
+    echo ""
+    
+    # 检查自定义文件
+    if [ -f "app/assets/stylesheets/_custom-theme.css" ]; then
+        echo -e "${GREEN}✅ 找到自定义样式文件${NC}"
+        echo "   app/assets/stylesheets/_custom-theme.css"
+    else
+        echo -e "${YELLOW}⚠️ 未找到自定义样式文件${NC}"
+        echo "   建议创建: app/assets/stylesheets/_custom-theme.css"
+    fi
+}
+
+# ============================================================
+# 显示帮助
+# ============================================================
+show_help() {
+    print_header
+    show_workflow
+    
+    echo -e "${BLUE}详细说明：${NC}"
+    echo ""
+    echo "【init】首次设置"
+    echo "  - 配置upstream为fetch-only（禁止推送）"
+    echo "  - 创建custom/main分支作为你的真相源"
+    echo "  - 创建deploy分支用于发布"
+    echo ""
+    echo "【sync】日常同步"
+    echo "  - 从upstream拉取最新官方代码"
+    echo "  - 合并到custom/main（保留你的修改）"
+    echo "  - 更新deploy分支"
+    echo ""
+    echo "【push-custom】推送修改"
+    echo "  - 将custom/main推送到你的fork（origin）"
+    echo "  - 100%安全，不会接触官方仓库"
+    echo ""
+    echo "【merge-pr】合并特定PR"
+    echo "  - 如上游有你想用的PR（如2337），用这个命令"
+    echo "  - 自动创建feature分支，cherry-pick或merge"
+    echo ""
+    echo "【deploy】部署"
+    echo "  - 从custom/main创建deploy分支"
+    echo "  - 执行kamal deploy"
+    echo ""
+}
+
+# ============================================================
+# 主入口
+# ============================================================
+case "${1:-help}" in
+    init)
+        init_workflow
+        ;;
+    sync)
+        sync_upstream
+        ;;
+    push-custom)
+        push_custom
+        ;;
+    merge-pr)
+        merge_pr "$2"
+        ;;
+    deploy)
+        deploy_workflow
+        ;;
+    status)
+        show_status
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo -e "${RED}❌ 未知命令: $1${NC}"
+        echo ""
+        show_workflow
+        exit 1
+        ;;
+esac

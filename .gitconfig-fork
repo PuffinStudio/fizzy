@@ -1,0 +1,43 @@
+# Fizzy Fork 配置
+# 此文件定义了安全的工作流设置
+
+[remote]
+  # upstream: 官方仓库（fetch-only）
+  upstream.url = https://github.com/basecamp/fizzy.git
+  upstream.fetch = +refs/heads/*:refs/remotes/upstream/*
+  upstream.pushurl = NO_PUSH_CONFIGURED
+  
+  # origin: 你的fork（可push）
+  origin.url = git@github.com:PuffinStudio/fizzy.git
+  origin.fetch = +refs/heads/*:refs/remotes/origin/*
+
+[branch]
+  # 主分支设置
+  main.remote = origin
+  main.merge = refs/heads/main
+  main.rebase = false
+  
+  # 自定义分支设置
+  custom/main.remote = origin
+  custom/main.merge = refs/heads/custom/main
+  custom/main.rebase = false
+
+# 安全设置
+[receive]
+  # 拒绝推送到upstream（多重保护）
+  denyNonFastForwards = true
+  denyDeletes = true
+
+[push]
+  # 默认只推送到当前分支
+  default = simple
+  # 禁止推送到upstream
+  followTags = false
+
+[alias]
+  # 方便的别名
+  sync = "!bin/fizzy-fork sync"
+  push-custom = "!bin/fizzy-fork push-custom"
+  merge-pr = "!bin/fizzy-fork merge-pr"
+  deploy-fork = "!bin/fizzy-fork deploy"
+  fork-status = "!bin/fizzy-fork status"
